@@ -238,13 +238,27 @@ byte."
 
 (defparameter *cmd-prefix* 'red
   "Prefix for functions names that implement Redis commands.")
+(defparameter *lex-prefix* 'lred
+  "Prefix for the command method accepting a connection as the first argument")
 
 (defmacro def-cmd (cmd (&rest args) reply-type docstring)
   "Define and export a function with the name <*CMD-REDIX*>-<CMD> for ~
 processing a Redis command CMD.  Here REPLY-TYPE is the expected reply ~
 format."
-  (let ((cmd-name (intern (format nil "~a-~a" *cmd-prefix* cmd))))
+  (let ((cmd-name (intern (format nil "~a-~a" *cmd-prefix* cmd)))
+        (lex-name (intern (format nil "~a-~a" *lex-prefix* cmd))))
     `(progn
+       (defun ,lex-name (connection ,@args)
+         ,docstring
+         (return-from ,lex-name
+           (with-reconnect-restart connection
+             ,(if-it (position '&rest args)
+                     `(apply #'tell ',cmd
+                             ,@(subseq args 0 it)
+                             ,(nth (1+ it) args))
+                     `(tell ',cmd ,@args))
+               (expect ,reply-type))))
+
        (defun ,cmd-name ,args
          ,docstring
          (return-from ,cmd-name
