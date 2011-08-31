@@ -119,13 +119,13 @@ CMD is the command name (a string or a symbol), and ARGS are its arguments
 
 ;; receiving replies
 
-(defgeneric expect (type)
+(defgeneric expect (connection type)
   (:documentation "Receive and process the reply of the given type
-from Redis server."))
+from Redis server at `connection'."))
 
 (eval-always
-  (defmacro with-redis-in ((line char) &body body)
-    `(let* ((,line (read-line (connection-socket *connection*)))
+  (defmacro with-redis-in ((connection line char) &body body)
+    `(let* ((,line (read-line (connection-socket (or ,connection *connection*))))
             (,char (char ,line 0)))
        (when *echo-p* (format *echo-stream* "<  ~A~%" ,line))
        ,@body))
@@ -135,10 +135,10 @@ from Redis server."))
 variable REPLY, which is bound to the reply received from Redis ~
 server with the first character removed."
     (with-unique-names (line char)
-      `(defmethod expect ((type (eql ,type)))
+      `(defmethod expect (connection (type (eql ,type)))
          ,(format nil "Receive and process the reply of type ~a."
                   type)
-         (with-redis-in (,line ,char)
+         (with-redis-in (connection ,line ,char)
            (let ((reply (subseq ,line 1)))
              (if (string= ,line "+QUEUED") "QUEUED"
                  (case ,char
@@ -149,18 +149,18 @@ server with the first character removed."
 initial reply byte."
                                                       ,char)))))))))))
 
-(defmethod expect ((type (eql :anything)))
+(defmethod expect (connection (type (eql :anything)))
   "Receive and process status reply, which is just a string, preceeded with +."
-  (case (peek-char nil (connection-socket *connection*))
-    (#\+ (expect :status))
-    (#\: (expect :inline))
-    (#\$ (expect :bulk))
-    (#\* (expect :multi))
-    (otherwise (expect :status))))  ; will do error-signalling
+  (case (peek-char nil (connection-socket (or connection *connection*)))
+    (#\+ (expect connection :status))
+    (#\: (expect connection :inline))
+    (#\$ (expect connection :bulk))
+    (#\* (expect connection :multi))
+    (otherwise (expect connection :status))))  ; will do error-signalling
 
-(defmethod expect ((type (eql :status)))
+(defmethod expect (connection (type (eql :status)))
   "Receive and process status reply, which is just a string, preceeded with +."
-  (with-redis-in (line char)
+  (with-redis-in (connection line char)
     (case char
       (#\- (error 'redis-error-reply :message (subseq line 1)))
       (#\+ (subseq line 1))
@@ -184,7 +184,7 @@ byte."
              `(let ((n (parse-integer reply)))
                 (unless (<= n 0)
                   (let ((octets (make-array n :element-type '(unsigned-byte 8)))
-                        (socket (connection-socket *connection*)))
+                        (socket (connection-socket (or connection *connection*))))
                     (read-sequence octets socket)
                     (read-byte socket)  ; #\Return
                     (read-byte socket)  ; #\Linefeed
@@ -203,20 +203,20 @@ byte."
   (let ((n (parse-integer reply)))
     (unless (= n -1)
       (loop :repeat n
-         :collect (expect :bulk)))))
+         :collect (expect connection :bulk)))))
 
 (def-expect-method :queued
   (let ((n (parse-integer reply)))
     (unless (= n -1)
       (loop :repeat n
-         :collect (expect :anything)))))
+         :collect (expect connection :anything)))))
 
-(defmethod expect ((type (eql :pubsub)))
-  (let ((in (connection-socket *connection*)))
-    (loop :collect (with-redis-in (line char)
-                     (list (expect :bulk)
-                           (expect :bulk)
-                           (expect :inline)))
+(defmethod expect (connection (type (eql :pubsub)))
+  (let ((in (connection-socket (or connection *connection*))))
+    (loop :collect (with-redis-in (connection line char)
+                     (list (expect connection :bulk)
+                           (expect connection :bulk)
+                           (expect connection :inline)))
        :do (let ((next-char (read-char-no-hang in)))
              (if next-char (progn (unread-char next-char in)
                                   ;; after unread-char #\Newline is
@@ -224,14 +224,14 @@ byte."
                                   (read-char in))
                  (loop-finish))))))
 
-(defmethod expect ((type (eql :end)))
+(defmethod expect (connection (type (eql :end)))
   ;; Used for commands QUIT and SHUTDOWN (does nothing)
   )
 
-(defmethod expect ((type (eql :list)))
+(defmethod expect (connection (type (eql :list)))
   ;; Used to make Redis KEYS command return a list of strings (keys)
   ;; rather than a single string
-  (cl-ppcre:split " " (expect :bulk)))
+  (cl-ppcre:split " " (expect connection :bulk)))
 
 
 ;; high-level command definition
@@ -253,22 +253,24 @@ format."
          (return-from ,lex-name
            (with-reconnect-restart connection
              ,(if-it (position '&rest args)
-                     `(apply #'tell ',cmd
+                     `(apply #'tell connection ',cmd
                              ,@(subseq args 0 it)
                              ,(nth (1+ it) args))
-                     `(tell ',cmd ,@args))
-               (expect ,reply-type))))
+                     `(tell connection ',cmd ,@args))
+               (expect connection ,reply-type))))
 
        (defun ,cmd-name ,args
          ,docstring
          (return-from ,cmd-name
            (with-reconnect-restart *connection*
              ,(if-it (position '&rest args)
-                     `(apply #'tell ',cmd
+                     `(apply #'tell *connection* ',cmd
                              ,@(subseq args 0 it)
                              ,(nth (1+ it) args))
-                     `(tell ',cmd ,@args))
-               (expect ,reply-type))))
+                     `(tell *connection* ',cmd ,@args))
+               (expect *connection* ,reply-type))))
+
+       (export ',lex-name :redis)
        (export ',cmd-name :redis))))
 
 ;; pipelining
