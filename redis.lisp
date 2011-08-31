@@ -10,12 +10,12 @@
   "Return the length of STRING if encoded using utf-8 external format."
   (length (babel:string-to-octets string)))
 
-(defun format-redis-line (fmt &rest args)
+(defun format-redis-line (connection fmt &rest args)
   "Write a CRLF-terminated string formatted according to the given control ~
 string FMT and its arguments ARGS to the stream of the current connection.
 If *ECHOP-P* is not NIL, write that string to *ECHO-STREAM*, too."
   (let ((string (apply #'format nil fmt args))
-        (redis-out (connection-socket *connection*)))
+        (redis-out (connection-socket connection)))
     (when *echo-p* (format *echo-stream* " > ~A~%" string))
     (write-sequence (babel:string-to-octets string
                                             :encoding :utf-8)
@@ -69,11 +69,11 @@ CMD is the command name (a string or a symbol), and ARGS are its arguments
   (force-output (connection-socket (or connection *connection*))))
 
 (defmethod tell (connection cmd &rest args)
-  (format-redis-line "*~A" (1+ (length args)))
+  (format-redis-line connection "*~A" (1+ (length args)))
   (mapcar (lambda (arg)
             (let ((arg (princ-to-string arg)))
-              (format-redis-line "$~A" (byte-length arg))
-              (format-redis-line "~A"  arg)))
+              (format-redis-line connection "$~A" (byte-length arg))
+              (format-redis-line connection "~A"  arg)))
           (cons cmd args)))
 
 (defmethod tell (connection (cmd (eql 'SORT)) &rest args)
