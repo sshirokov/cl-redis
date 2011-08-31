@@ -7,7 +7,7 @@
   (:use :common-lisp :rutils.usr)
   (:export #:redis-connection
            #:connection-external-format
-           
+
            #:connect
            #:disconnect
            #:reconnect
@@ -16,6 +16,7 @@
            #:close-connection
            #:connected-p
            #:with-connection
+           #:with-named-connection
            #:with-recursive-connection
 
            #:*echo-p*
@@ -33,5 +34,5 @@
            #:redis-error-reply
            #:redis-connection-error
 
-           #:with-pipelining)) 
+           #:with-pipelining))
 ;;; end

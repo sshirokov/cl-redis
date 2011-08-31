@@ -133,6 +133,13 @@ specified by the given HOST and PORT"
      (unwind-protect (progn ,@body)
        (close-connection *connection*))))
 
+(defmacro with-named-connection ((connection-sym &key (host #(127 0 0 1)) (port 6379)) &body body)
+  `(let ((,connection-sym (make-instance 'redis-connection
+                                         :host ,host
+                                         :port ,port)))
+     (unwind-protect (progn ,@body)
+       (close-connection ,connection-sym))))
+
 (defmacro with-recursive-connection ((&key (host #(127 0 0 1))
                                            (port 6379))
                                      &body body)
