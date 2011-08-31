@@ -59,16 +59,16 @@ server."))
 
 ;; sending commands to the server
 
-(defgeneric tell (cmd &rest args)
+(defgeneric tell (connection cmd &rest args)
   (:documentation "Send a command to Redis server over a socket connection.
 CMD is the command name (a string or a symbol), and ARGS are its arguments
 \(keyword arguments are also supported)."))
 
-(defmethod tell :after (cmd &rest args)
+(defmethod tell :after (connection cmd &rest args)
   (declare (ignore cmd args))
-  (force-output (connection-socket *connection*)))
+  (force-output (connection-socket (or connection *connection*))))
 
-(defmethod tell (cmd &rest args)
+(defmethod tell (connection cmd &rest args)
   (format-redis-line "*~A" (1+ (length args)))
   (mapcar (lambda (arg)
             (let ((arg (princ-to-string arg)))
@@ -76,29 +76,29 @@ CMD is the command name (a string or a symbol), and ARGS are its arguments
               (format-redis-line "~A"  arg)))
           (cons cmd args)))
 
-(defmethod tell ((cmd (eql 'SORT)) &rest args)
-  (flet ((send-request (key &key by get desc alpha start end)
+(defmethod tell (connection (cmd (eql 'SORT)) &rest args)
+  (flet ((send-request (connection key &key by get desc alpha start end)
            (assert (or (and start end)
                        (and (null start) (null end))))
-           (apply #'tell "SORT"
+           (apply #'tell connection "SORT"
                   (nconc (list key)
                          (when by (list "BY" by))
                          (when get (list "GET" get))
                          (when desc (list "DESC"))
                          (when alpha (list "ALPHA"))
                          (when start (list "LIMIT" start end))))))
-    (apply #'send-request args)))
+    (apply #'send-request connection args)))
 
-(flet ((send-request (cmd key start end &key withscores)
-         (apply #'tell (princ-to-string cmd)
+(flet ((send-request (connection cmd key start end &key withscores)
+         (apply #'tell connection (princ-to-string cmd)
                 (nconc (list key start end)
                        (when withscores (list "WITHSCORES"))))))
-  (defmethod tell ((cmd (eql 'ZRANGE)) &rest args)
-    (apply #'send-request cmd args))
-  (defmethod tell ((cmd (eql 'ZREVRANGE)) &rest args)
-    (apply #'send-request cmd args)))
+  (defmethod tell (connection (cmd (eql 'ZRANGE)) &rest args)
+    (apply #'send-request connection cmd args))
+  (defmethod tell (connection (cmd (eql 'ZREVRANGE)) &rest args)
+    (apply #'send-request connection cmd args)))
 
-(flet ((send-request (cmd dstkey n keys &key weights aggregate)
+(flet ((send-request (connection cmd dstkey n keys &key weights aggregate)
          (assert (integerp n))
          (assert (= n (length keys)))
          (when weights
@@ -106,15 +106,15 @@ CMD is the command name (a string or a symbol), and ARGS are its arguments
            (assert (every #'numberp weights)))
          (when aggregate
            (assert (member aggregate '(:sum :min :max))))
-         (apply #'tell (princ-to-string cmd)
+         (apply #'tell connection (princ-to-string cmd)
                 (nconc (list dstkey n)
                        keys
                        (when weights (cons "WEIGHTS" weights))
                        (when aggregate (list "AGGREGATE" aggregate))))))
-  (defmethod tell ((cmd (eql 'ZUNIONSTORE)) &rest args)
-    (apply #'send-request cmd args))
-  (defmethod tell ((cmd (eql 'ZINTERSTORE)) &rest args)
-    (apply #'send-request cmd args)))
+  (defmethod tell (connection (cmd (eql 'ZUNIONSTORE)) &rest args)
+    (apply #'send-request connection cmd args))
+  (defmethod tell (connection (cmd (eql 'ZINTERSTORE)) &rest args)
+    (apply #'send-request connection cmd args)))
 
 
 ;; receiving replies
